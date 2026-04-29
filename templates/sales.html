@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+{% block title %}{{ section.display }} — المبيعات{% endblock %}
+{% set active_page = 'sales_' + section_key %}
+{% block page_title %}🌾 {{ section.display }}{% endblock %}
+
+{% block content %}
+<!-- إحصائيات القسم -->
+<div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-card"><div class="stat-label">💰 إجمالي المبيعات</div><div class="stat-value" id="s-total">—</div></div>
+  <div class="stat-card"><div class="stat-label">✅ المحصّل</div><div class="stat-value green" id="s-paid">—</div></div>
+  <div class="stat-card danger"><div class="stat-label">⏳ المتبقي</div><div class="stat-value red" id="s-unpaid">—</div></div>
+</div>
+
+<!-- أزرار + فلاتر -->
+<div class="card mb-3">
+  <div class="flex-between mb-2" style="flex-wrap:wrap;gap:10px">
+    <div class="flex gap-2" style="flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="openModal('modal-add')">➕ إضافة مبيعة</button>
+      <button class="btn btn-secondary" onclick="openModal('modal-filter')">🔍 فلترة</button>
+      <button class="btn btn-secondary" onclick="clearFilters()">🔄 الكل</button>
+    </div>
+    <div class="flex gap-2">
+      <a href="/api/export/excel?section={{ section_key }}" class="btn btn-secondary">📊 Excel</a>
+    </div>
+  </div>
+  <!-- الفلاتر السريعة -->
+  <div class="flex gap-2" style="flex-wrap:wrap">
+    <button class="btn btn-sm btn-secondary" onclick="filterByAccounted('')">الكل</button>
+    <button class="btn btn-sm btn-secondary" onclick="filterByAccounted('باقي')">⏳ باقي فقط</button>
+    <button class="btn btn-sm btn-secondary" onclick="filterByAccounted('محاسب')">✅ محاسب فقط</button>
+  </div>
+</div>
+
+<!-- جدول البيانات -->
+<div class="card">
+  <div class="card-header flex-between">
+    <span id="records-count">جاري التحميل...</span>
+    <input type="search" placeholder="🔍 بحث سريع..." id="quick-search"
+      oninput="quickSearch(this.value)"
+      style="width:180px;padding:6px 10px;font-size:13px">
+  </div>
+  <div class="table-wrap">
+    <table id="sales-table">
+      <thead>
+        <tr>
+          <th>التاريخ</th><th>اليوم</th><th>المحصول</th>
+          <th>الكمية</th><th>الوحدة</th><th>السعر</th><th>المجموع</th>
+          <th>المشتري</th><th>الحالة</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody id="sales-body">
+        <tr><td colspan="10"><div class="loading"><div class="spinner"></div></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal: إضافة/تعديل مبيعة -->
+<div class="modal-overlay" id="modal-add">
+  <div class="modal">
+    <div class="modal-title"><span id="modal-add-title">➕ إضافة مبيعة جديدة</span></div>
+    <input type="hidden" id="edit-id">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">📅 التاريخ</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">🌾 المحصول</label>
+        <select id="f-product">
+          <option value="">اختر المحصول</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">⚖️ الكمية</label>
+        <input type="number" id="f-qty" step="0.1" min="0" placeholder="0.0" oninput="calcTotal()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">📏 الوحدة</label>
+        <select id="f-unit">
+          <option value="كغ">كغ</option>
+          <option value="طن">طن</option>
+          <option value="كرتون">كرتون</option>
+          <option value="صندوق">صندوق</option>
+          <option value="حبة">حبة</option>
+          <option value="شوال">شوال</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">💵 السعر للوحدة</label>
+        <input type="number" id="f-price" step="0.01" min="0" placeholder="0.00" oninput="calcTotal()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">💰 الإجمالي</label>
+        <input type="number" id="f-total" placeholder="0.00" readonly style="background:var(--bg);color:var(--accent);font-weight:700">
+      </div>
+      <div class="form-group">
+        <label class="form-label">👤 المشتري</label>
+        <select id="f-buyer">
+          <option value="">— بدون مشتري —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">📋 المحاسبة</label>
+        <select id="f-accounted">
+          <option value="باقي">⏳ باقي</option>
+          <option value="محاسب">✅ محاسب</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">📝 ملاحظات</label>
+      <textarea id="f-notes" rows="2" placeholder="ملاحظات اختيارية..."></textarea>
+    </div>
+    <div class="flex gap-2 mt-3">
+      <button class="btn btn-primary" onclick="submitSale()" style="flex:1">💾 حفظ</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-add')" style="flex:1">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: فلترة -->
+<div class="modal-overlay" id="modal-filter">
+  <div class="modal">
+    <div class="modal-title">🔍 فلترة السجلات</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">من تاريخ</label>
+        <input type="date" id="filter-from">
+      </div>
+      <div class="form-group">
+        <label class="form-label">إلى تاريخ</label>
+        <input type="date" id="filter-to">
+      </div>
+      <div class="form-group">
+        <label class="form-label">المشتري</label>
+        <select id="filter-buyer"><option value="">الكل</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">المحصول</label>
+        <select id="filter-product"><option value="">الكل</option></select>
+      </div>
+    </div>
+    <div class="flex gap-2 mt-3">
+      <button class="btn btn-primary" onclick="applyFilters()" style="flex:1">🔍 تطبيق</button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-filter')" style="flex:1">إلغاء</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SECTION = '{{ section_key }}';
+let allRows = [];
+let buyers = [];
+let currentFilters = {};
+
+// تحميل البيانات
+async function loadData(filters={}) {
+  currentFilters = filters;
+  const q = new URLSearchParams({limit:500, ...filters}).toString();
+  try {
+    const d = await api(`/api/sales/${SECTION}?${q}`);
+    allRows = d.rows;
+    renderTable(allRows);
+    document.getElementById('s-total').textContent = fmt(d.total);
+    document.getElementById('s-paid').textContent = fmt(d.paid);
+    document.getElementById('s-unpaid').textContent = fmt(d.unpaid);
+    document.getElementById('records-count').textContent = `📋 ${d.rows.length} سجل`;
+  } catch(e) {
+    showToast('خطأ في تحميل البيانات', 'error');
+  }
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('sales-body');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-muted" style="padding:30px;text-align:center">لا توجد سجلات</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const isCls = r.accounted === 'محاسب' ? 'row-paid' : 'row-unpaid';
+    const badge = r.accounted === 'محاسب'
+      ? '<span class="badge badge-paid">✅ محاسب</span>'
+      : '<span class="badge badge-unpaid">⏳ باقي</span>';
+    const price = r.price ? r.price.toFixed(2) + ' ₪' : '—';
+    return `<tr class="${isCls}" id="row-${r.id}">
+      <td>${r.date}</td>
+      <td class="text-muted fs-sm">${r.day||''}</td>
+      <td><strong>${r.product||''}</strong></td>
+      <td>${fmtN(r.qty)}</td>
+      <td class="text-muted">${r.unit||''}</td>
+      <td>${price}</td>
+      <td><strong style="color:var(--accent)">${fmt(r.total)}</strong></td>
+      <td>${r.buyer||'<span class="text-muted">—</span>'}</td>
+      <td>${badge}</td>
+      <td>
+        <button class="btn-icon" onclick='editRow(${JSON.stringify(r)})' title="تعديل">✏️</button>
+        <button class="btn-icon" onclick="deleteRow('${r.id}')" title="حذف">🗑️</button>
+        ${r.accounted !== 'محاسب' ? `<button class="btn-icon" onclick="markPaidRow('${r.id}')" title="محاسبة">✅</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// بحث سريع
+function quickSearch(q) {
+  q = q.toLowerCase();
+  const filtered = allRows.filter(r =>
+    (r.product||'').includes(q) ||
+    (r.buyer||'').toLowerCase().includes(q) ||
+    (r.date||'').includes(q) ||
+    (r.notes||'').includes(q)
+  );
+  renderTable(filtered);
+}
+
+// تحميل المشترين والمحاصيل
+async function loadBuyers() {
+  try {
+    buyers = await api('/api/buyers');
+    const selects = ['f-buyer', 'filter-buyer'];
+    selects.forEach(id => {
+      const el = document.getElementById(id);
+      const keep = el.innerHTML.includes('بدون') ? '<option value="">— بدون مشتري —</option>' : '<option value="">الكل</option>';
+      el.innerHTML = keep + buyers.map(b => `<option value="${b.name}">${b.name}</option>`).join('');
+    });
+  } catch(e) {}
+}
+
+async function loadProducts() {
+  try {
+    const s = await api('/api/settings');
+    const products = s.products || [];
+    const sel = document.getElementById('f-product');
+    const fp = document.getElementById('filter-product');
+    sel.innerHTML = '<option value="">اختر المحصول</option>' + products.map(p => `<option value="${p}">${p}</option>`).join('');
+    fp.innerHTML = '<option value="">الكل</option>' + products.map(p => `<option value="${p}">${p}</option>`).join('');
+  } catch(e) {}
+}
+
+// حساب الإجمالي
+function calcTotal() {
+  const qty = parseFloat(document.getElementById('f-qty').value) || 0;
+  const price = parseFloat(document.getElementById('f-price').value) || 0;
+  document.getElementById('f-total').value = (qty * price).toFixed(2);
+}
+
+// إضافة/تعديل
+function openAddModal() {
+  document.getElementById('edit-id').value = '';
+  document.getElementById('modal-add-title').textContent = '➕ إضافة مبيعة جديدة';
+  document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('f-product').value = '';
+  document.getElementById('f-qty').value = '';
+  document.getElementById('f-price').value = '';
+  document.getElementById('f-total').value = '';
+  document.getElementById('f-unit').value = 'كغ';
+  document.getElementById('f-buyer').value = '';
+  document.getElementById('f-accounted').value = 'باقي';
+  document.getElementById('f-notes').value = '';
+  openModal('modal-add');
+}
+
+function editRow(r) {
+  document.getElementById('edit-id').value = r.id;
+  document.getElementById('modal-add-title').textContent = '✏️ تعديل سجل';
+  document.getElementById('f-date').value = r.date || '';
+  document.getElementById('f-product').value = r.product || '';
+  document.getElementById('f-qty').value = r.qty || '';
+  document.getElementById('f-price').value = r.price || '';
+  document.getElementById('f-total').value = r.total ? r.total.toFixed(2) : '';
+  document.getElementById('f-unit').value = r.unit || 'كغ';
+  document.getElementById('f-buyer').value = r.buyer || '';
+  document.getElementById('f-accounted').value = r.accounted || 'باقي';
+  document.getElementById('f-notes').value = r.notes || '';
+  openModal('modal-add');
+}
+
+async function submitSale() {
+  const editId = document.getElementById('edit-id').value;
+  const body = {
+    date: document.getElementById('f-date').value,
+    product: document.getElementById('f-product').value,
+    qty: document.getElementById('f-qty').value,
+    unit: document.getElementById('f-unit').value,
+    price: document.getElementById('f-price').value,
+    buyer: document.getElementById('f-buyer').value,
+    accounted: document.getElementById('f-accounted').value,
+    notes: document.getElementById('f-notes').value,
+  };
+  if (!body.date || !body.product || !body.qty) {
+    showToast('يرجى ملء الحقول المطلوبة', 'error'); return;
+  }
+  try {
+    if (editId) {
+      await api(`/api/sales/${SECTION}/${editId}`, 'PUT', body);
+      showToast('✅ تم التعديل بنجاح');
+    } else {
+      await api(`/api/sales/${SECTION}`, 'POST', body);
+      showToast('✅ تمت الإضافة بنجاح');
+    }
+    closeModal('modal-add');
+    loadData(currentFilters);
+  } catch(e) {
+    showToast('خطأ: ' + e.message, 'error');
+  }
+}
+
+async function deleteRow(id) {
+  if (!confirm('هل تريد حذف هذا السجل؟')) return;
+  try {
+    await api(`/api/sales/${SECTION}/${id}`, 'DELETE');
+    showToast('🗑️ تم الحذف');
+    loadData(currentFilters);
+  } catch(e) {
+    showToast('خطأ في الحذف', 'error');
+  }
+}
+
+async function markPaidRow(id) {
+  const row = allRows.find(r => r.id === id);
+  if (!row) return;
+  try {
+    await api(`/api/sales/${SECTION}/${id}`, 'PUT', {...row, accounted: 'محاسب'});
+    showToast('✅ تم تحديد محاسب');
+    loadData(currentFilters);
+  } catch(e) {
+    showToast('خطأ', 'error');
+  }
+}
+
+// فلترة
+function filterByAccounted(val) {
+  const f = {...currentFilters};
+  if (val) f.accounted = val; else delete f.accounted;
+  loadData(f);
+}
+
+function applyFilters() {
+  const f = {};
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  const buyer = document.getElementById('filter-buyer').value;
+  const product = document.getElementById('filter-product').value;
+  if (from) f.date_from = from;
+  if (to) f.date_to = to;
+  if (buyer) f.buyer = buyer;
+  if (product) f.product = product;
+  closeModal('modal-filter');
+  loadData(f);
+}
+
+function clearFilters() {
+  currentFilters = {};
+  loadData({});
+}
+
+// تعيين اليوم
+document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+
+// إضافة زر الإضافة للـ topbar على الموبايل
+document.querySelector('.topbar-right').insertAdjacentHTML('beforeend',
+  `<button class="btn btn-primary btn-sm" onclick="openAddModal()">➕ إضافة</button>`);
+
+// تحميل أولي
+loadData();
+loadBuyers();
+loadProducts();
+</script>
+{% endblock %}
