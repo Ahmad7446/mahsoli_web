@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}التقارير{% endblock %}
+{% block page_title %}التقارير{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-sm btn-outline" onclick="downloadExcel()">↓ Excel</button>
+{% endblock %}
+
+{% block content %}
+<div class="card mb-3">
+  <div class="card-head"><span class="card-title">خيارات التقرير</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px">
+    <div class="form-group">
+      <label class="form-label">من تاريخ</label>
+      <input type="date" class="form-control" id="r-from">
+    </div>
+    <div class="form-group">
+      <label class="form-label">إلى تاريخ</label>
+      <input type="date" class="form-control" id="r-to">
+    </div>
+    <div class="form-group">
+      <label class="form-label">القسم</label>
+      <select class="form-control" id="r-section">
+        <option value="">الكل</option>
+        {% for key, sec in settings.sections.items() %}
+        <option value="{{ key }}">{{ sec.display }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">المشتري</label>
+      <select class="form-control" id="r-buyer"><option value="">الكل</option></select>
+    </div>
+  </div>
+  <div class="row gap-2 flex-wrap">
+    <button class="btn btn-primary btn-sm" onclick="loadReport()">عرض التقرير</button>
+    <button class="btn btn-outline btn-sm" onclick="setRange('week')">هذا الأسبوع</button>
+    <button class="btn btn-outline btn-sm" onclick="setRange('month')">هذا الشهر</button>
+    <button class="btn btn-outline btn-sm" onclick="setRange('year')">هذه السنة</button>
+    <button class="btn btn-ghost btn-sm"   onclick="clearRange()">الكل</button>
+  </div>
+</div>
+
+<div id="report-body" style="display:none">
+  <!-- إحصائيات -->
+  <div class="stats-row mb-3">
+    <div class="stat"><div class="stat-label">الإجمالي</div><div class="stat-value" id="r-total">—</div></div>
+    <div class="stat"><div class="stat-label">المحصّل</div><div class="stat-value green" id="r-paid">—</div></div>
+    <div class="stat"><div class="stat-label">المتبقي</div><div class="stat-value red" id="r-unpaid">—</div></div>
+    <div class="stat"><div class="stat-label">عدد السجلات</div><div class="stat-value" id="r-count">—</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="card">
+      <div class="card-head"><span class="card-title">المحاصيل</span></div>
+      <div id="rpt-products"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">المشترون</span></div>
+      <div id="rpt-buyers"></div>
+    </div>
+  </div>
+
+  <!-- الرسم اليومي -->
+  <div class="card mb-3">
+    <div class="card-head"><span class="card-title">المبيعات اليومية</span></div>
+    <div id="rpt-chart" style="overflow-x:auto;padding:8px 0"></div>
+  </div>
+
+  <!-- الجدول التفصيلي -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="row-between" style="padding:14px 20px;border-bottom:1px solid var(--grey-1)">
+      <span class="card-title">السجلات التفصيلية</span>
+      <span class="text-sm text-muted" id="r-detail-count"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>التاريخ</th><th>اليوم</th><th>القسم</th><th>المحصول</th>
+            <th>الكمية</th><th>الوحدة</th><th>السعر</th><th>المجموع</th>
+            <th>المشتري</th><th>الحالة</th>
+          </tr>
+        </thead>
+        <tbody id="rpt-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function init() {
+  try {
+    const buyers = await api('/api/buyers');
+    document.getElementById('r-buyer').innerHTML = '<option value="">الكل</option>' +
+      buyers.map(b => `<option value="${b.name}">${b.name}</option>`).join('');
+  } catch(e) {}
+  const now = new Date();
+  document.getElementById('r-from').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  document.getElementById('r-to').value   = todayISO();
+  loadReport();
+}
+
+function setRange(type) {
+  const now = new Date();
+  let from;
+  if (type === 'week') {
+    const d = new Date(now); d.setDate(d.getDate() - ((d.getDay()+6)%7));
+    from = d.toISOString().split('T')[0];
+  } else if (type === 'month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  } else {
+    from = `${now.getFullYear()}-01-01`;
+  }
+  document.getElementById('r-from').value = from;
+  document.getElementById('r-to').value   = todayISO();
+  loadReport();
+}
+
+function clearRange() {
+  document.getElementById('r-from').value = '';
+  document.getElementById('r-to').value   = '';
+  loadReport();
+}
+
+async function loadReport() {
+  const p = new URLSearchParams();
+  const from    = document.getElementById('r-from').value;
+  const to      = document.getElementById('r-to').value;
+  const section = document.getElementById('r-section').value;
+  const buyer   = document.getElementById('r-buyer').value;
+  if (from)    p.set('from', from);
+  if (to)      p.set('to', to);
+  if (section) p.set('section', section);
+  if (buyer)   p.set('buyer', buyer);
+
+  try {
+    const d = await api(`/api/report?${p}`);
+    document.getElementById('report-body').style.display = 'block';
+    document.getElementById('r-total').textContent  = fmtMoney(d.total);
+    document.getElementById('r-paid').textContent   = fmtMoney(d.paid);
+    document.getElementById('r-unpaid').textContent = fmtMoney(d.unpaid);
+    document.getElementById('r-count').textContent  = d.count;
+
+    const maxP = d.by_product[0]?.total || 1;
+    document.getElementById('rpt-products').innerHTML = d.by_product.slice(0,8).map(p => `
+      <div style="margin-bottom:11px">
+        <div class="row-between mb-2"><span class="fw-7 text-sm">${p.name}</span><span class="fw-8 text-sm">${fmtMoney(p.total)}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(p.total/maxP*100).toFixed(0)}%"></div></div>
+        <div class="text-xs text-muted mt-1">${fmtNum(p.qty)} وحدة</div>
+      </div>`).join('') || '<div class="empty-state"><p>لا بيانات</p></div>';
+
+    const maxB = d.by_buyer[0]?.total || 1;
+    document.getElementById('rpt-buyers').innerHTML = d.by_buyer.slice(0,8).map(b => `
+      <div style="margin-bottom:11px">
+        <div class="row-between mb-2">
+          <span class="fw-7 text-sm">${b.name}</span>
+          <div style="text-align:left">
+            <div class="fw-8 text-sm">${fmtMoney(b.total)}</div>
+            ${b.unpaid>0?`<div class="text-xs text-red">${fmtMoney(b.unpaid)} متبقي</div>`:''}
+          </div>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(b.total/maxB*100).toFixed(0)}%;background:${b.unpaid>0?'var(--red)':'var(--black)'}"></div></div>
+      </div>`).join('') || '<div class="empty-state"><p>لا بيانات</p></div>';
+
+    // الرسم اليومي
+    const maxD = Math.max(...d.by_date.map(x=>x.total), 1);
+    const H = 70;
+    document.getElementById('rpt-chart').innerHTML = `
+      <div style="display:flex;align-items:flex-end;gap:5px;min-width:${d.by_date.length*30}px;padding:0 4px">
+        ${d.by_date.map(x => {
+          const h = Math.max(3, (x.total/maxD*H));
+          return `<div title="${x.date}: ${fmtMoney(x.total)}"
+            style="flex:0 0 22px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:default">
+            <div style="width:18px;height:${h}px;background:var(--black);border-radius:2px 2px 0 0;opacity:.8"></div>
+            <div style="font-size:9px;color:var(--grey-3);writing-mode:vertical-lr;transform:rotate(180deg);line-height:1">${x.date.slice(5)}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+
+    document.getElementById('r-detail-count').textContent = `${d.rows.length} سجل`;
+    document.getElementById('rpt-tbody').innerHTML = d.rows.map(r => `
+      <tr class="${r.accounted==='محاسب'?'row-paid':'row-unpaid'}">
+        <td class="fw-7">${r.date}</td>
+        <td class="text-muted">${r.day||''}</td>
+        <td>${r.section_name||''}</td>
+        <td class="fw-7">${r.product}</td>
+        <td>${fmtNum(r.qty)}</td>
+        <td class="text-muted">${r.unit||''}</td>
+        <td>${r.price?r.price.toFixed(2):'—'}</td>
+        <td class="fw-8">${fmtMoney(r.total)}</td>
+        <td>${r.buyer||'—'}</td>
+        <td><span class="badge ${r.accounted==='محاسب'?'badge-paid':'badge-unpaid'}">${r.accounted}</span></td>
+      </tr>`).join('');
+  } catch(e) {
+    toast('خطأ في تحميل التقرير', 'err');
+  }
+}
+
+function downloadExcel() {
+  const p = new URLSearchParams();
+  const from    = document.getElementById('r-from').value;
+  const to      = document.getElementById('r-to').value;
+  const section = document.getElementById('r-section').value;
+  if (from)    p.set('from', from);
+  if (to)      p.set('to', to);
+  if (section) p.set('section', section);
+  window.location.href = `/api/export/excel?${p}`;
+}
+
+init();
+</script>
+{% endblock %}

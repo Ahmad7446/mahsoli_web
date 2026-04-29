@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}الإعدادات{% endblock %}
+{% block page_title %}الإعدادات{% endblock %}
+
+{% block content %}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+
+  <!-- المزرعة -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">معلومات المزرعة</span></div>
+    <div class="form-group mb-3">
+      <label class="form-label">اسم المزرعة</label>
+      <input type="text" class="form-control" id="s-farm" placeholder="مزرعتي">
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="saveFarm()">حفظ</button>
+  </div>
+
+  <!-- المحاصيل -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">قائمة المحاصيل</span></div>
+    <div id="products-list" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+    <div class="row gap-2">
+      <input type="text" class="form-control" id="new-product" placeholder="اسم المحصول..." style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addProduct()">إضافة</button>
+    </div>
+  </div>
+
+  <!-- الأقسام -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">الأقسام</span></div>
+    <div id="sections-list"></div>
+  </div>
+
+  <!-- قاعدة البيانات -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">النظام والبيانات</span></div>
+    <div id="db-stats" class="mb-3"><div class="loading"><div class="spin"></div></div></div>
+    <div class="row gap-2 flex-wrap">
+      <button class="btn btn-primary btn-sm" onclick="doBackup()">نسخ احتياطي</button>
+      <a href="/api/export/excel" class="btn btn-outline btn-sm">تصدير Excel كامل</a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let products = [];
+
+async function loadSettings() {
+  try {
+    const s = await api('/api/settings');
+    document.getElementById('s-farm').value = s.farm_name || '';
+    products = s.products || [];
+    renderProducts();
+
+    document.getElementById('sections-list').innerHTML =
+      Object.entries(s.sections||{}).map(([k,sec]) => `
+        <div class="row-between" style="padding:10px 0;border-bottom:1px solid var(--grey-1)">
+          <div>
+            <div class="fw-7" style="font-size:14px">${sec.display}</div>
+            <div class="text-xs text-muted">${sec.type==='full'?'مزرعة كاملة':'مشترك'}</div>
+          </div>
+          <a href="/sales/${k}" class="btn btn-xs btn-outline">فتح</a>
+        </div>`).join('');
+  } catch(e) { toast('خطأ في التحميل', 'err'); }
+}
+
+async function loadDbStats() {
+  try {
+    const s = await api('/api/db_stats');
+    document.getElementById('db-stats').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:10px;background:var(--off);border-radius:6px;text-align:center">
+          <div class="text-xs text-muted mb-1">السجلات</div>
+          <div class="fw-9" style="font-size:20px">${s.total.toLocaleString()}</div>
+        </div>
+        <div style="padding:10px;background:var(--off);border-radius:6px;text-align:center">
+          <div class="text-xs text-muted mb-1">حجم قاعدة البيانات</div>
+          <div class="fw-9" style="font-size:20px">${s.db_size_kb} KB</div>
+        </div>
+        <div style="padding:10px;background:var(--off);border-radius:6px;text-align:center">
+          <div class="text-xs text-muted mb-1">النسخ الاحتياطية</div>
+          <div class="fw-9" style="font-size:20px">${s.backups}</div>
+        </div>
+      </div>`;
+  } catch(e) {}
+}
+
+function renderProducts() {
+  document.getElementById('products-list').innerHTML = products.length
+    ? products.map((p, i) => `
+        <div class="row-between" style="padding:6px 0;border-bottom:1px solid var(--grey-1)">
+          <span style="font-size:13px">${p}</span>
+          <button class="btn-icon" onclick="removeProduct(${i})">✕</button>
+        </div>`).join('')
+    : '<div class="empty-state"><p>لا توجد محاصيل</p></div>';
+}
+
+function addProduct() {
+  const val = document.getElementById('new-product').value.trim();
+  if (!val) return;
+  if (products.includes(val)) { toast('المحصول موجود مسبقاً', 'err'); return; }
+  products.push(val);
+  document.getElementById('new-product').value = '';
+  renderProducts();
+  saveProducts();
+}
+
+function removeProduct(i) {
+  products.splice(i, 1);
+  renderProducts();
+  saveProducts();
+}
+
+async function saveProducts() {
+  try {
+    await api('/api/settings', 'POST', {products});
+    toast('تم حفظ المحاصيل', 'ok');
+  } catch(e) { toast('خطأ في الحفظ', 'err'); }
+}
+
+async function saveFarm() {
+  const name = document.getElementById('s-farm').value.trim();
+  if (!name) return;
+  try {
+    await api('/api/settings', 'POST', {farm_name: name});
+    document.getElementById('sb-farm').textContent = name;
+    toast('تم الحفظ', 'ok');
+  } catch(e) { toast('خطأ', 'err'); }
+}
+
+async function doBackup() {
+  try {
+    const r = await api('/api/backup', 'POST');
+    toast('تم إنشاء نسخة احتياطية', 'ok');
+    loadDbStats();
+  } catch(e) { toast('خطأ في النسخ الاحتياطي', 'err'); }
+}
+
+// Enter لإضافة محصول
+document.getElementById('new-product').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addProduct();
+});
+
+loadSettings();
+loadDbStats();
+</script>
+{% endblock %}

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}لوحة التحكم{% endblock %}
+{% block page_title %}لوحة التحكم{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-sm btn-outline" onclick="loadDash()">↺ تحديث</button>
+{% endblock %}
+
+{% block content %}
+<!-- إحصائيات رئيسية -->
+<div class="stats-row" id="main-stats">
+  <div class="stat">
+    <div class="stat-label">إجمالي المبيعات</div>
+    <div class="stat-value" id="d-total"><div class="spin"></div></div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">المحصّل</div>
+    <div class="stat-value green" id="d-paid">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">المتبقي</div>
+    <div class="stat-value red" id="d-unpaid">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">مبيعات اليوم</div>
+    <div class="stat-value amber" id="d-today">—</div>
+  </div>
+</div>
+
+<!-- بطاقات الأقسام -->
+<div class="stats-row" id="sections-row"></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <!-- المديونون -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">المديونون</span>
+      <a href="/buyers" class="btn btn-xs btn-ghost">عرض الكل ←</a>
+    </div>
+    <div id="debtors-list"><div class="loading"><div class="spin"></div></div></div>
+  </div>
+
+  <!-- آخر المبيعات -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-title">آخر المبيعات</span>
+    </div>
+    <div id="recent-list"><div class="loading"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- المحاصيل -->
+<div class="card mb-4">
+  <div class="card-head"><span class="card-title">المحاصيل الأكثر مبيعاً</span></div>
+  <div id="products-list"></div>
+</div>
+
+<!-- أزرار سريعة -->
+<div class="card">
+  <div class="card-head"><span class="card-title">إجراءات سريعة</span></div>
+  <div class="row gap-2 flex-wrap">
+    {% for key, sec in settings.sections.items() %}
+    <a href="/sales/{{ key }}" class="btn btn-primary">إضافة مبيعة — {{ sec.display }}</a>
+    {% endfor %}
+    <a href="/buyers"  class="btn btn-outline">المشترون</a>
+    <a href="/reports" class="btn btn-outline">التقارير</a>
+    <a href="/api/export/excel" class="btn btn-outline">تصدير Excel</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDash() {
+  try {
+    const d = await api('/api/dashboard');
+
+    document.getElementById('d-total').textContent  = fmtMoney(d.total);
+    document.getElementById('d-paid').textContent   = fmtMoney(d.paid);
+    document.getElementById('d-unpaid').textContent = fmtMoney(d.unpaid);
+    document.getElementById('d-today').textContent  = fmtMoney(d.today);
+
+    // أقسام
+    const sr = document.getElementById('sections-row');
+    sr.innerHTML = Object.entries(d.sections).map(([k, s]) => `
+      <a href="/sales/${k}" class="stat" style="cursor:pointer;display:block">
+        <div class="stat-label">${s.display}</div>
+        <div class="stat-value">${fmtMoney(s.total)}</div>
+        <div class="stat-sub row gap-2 mt-1">
+          <span class="text-green">${fmtMoney(s.paid)}</span>
+          <span class="text-muted">·</span>
+          <span class="text-red">${fmtMoney(s.unpaid)}</span>
+        </div>
+      </a>`).join('');
+
+    // المديونون
+    const dl = document.getElementById('debtors-list');
+    if (!d.top_buyers.length) {
+      dl.innerHTML = '<div class="empty-state"><div class="ei">✓</div><p>لا توجد ديون</p></div>';
+    } else {
+      dl.innerHTML = d.top_buyers.map(b => `
+        <div class="row-between" style="padding:9px 0;border-bottom:1px solid var(--grey-1)">
+          <span class="fw-7" style="font-size:13px">${b.name}</span>
+          <span class="badge badge-unpaid">${fmtMoney(b.debt)}</span>
+        </div>`).join('');
+    }
+
+    // آخر المبيعات
+    document.getElementById('recent-list').innerHTML = d.recent.map(r => `
+      <div class="row-between" style="padding:8px 0;border-bottom:1px solid var(--grey-1)">
+        <div>
+          <div class="fw-7" style="font-size:13px">${r.product||'—'}</div>
+          <div class="text-xs text-muted mt-1">${r.date} ${r.buyer ? '· '+r.buyer : ''}</div>
+        </div>
+        <span class="fw-8" style="font-size:13px;color:var(--black)">${fmtMoney(r.total)}</span>
+      </div>`).join('');
+
+    // المحاصيل
+    const maxP = d.products[0]?.total || 1;
+    document.getElementById('products-list').innerHTML = d.products.map(p => `
+      <div style="margin-bottom:12px">
+        <div class="row-between mb-2">
+          <span class="fw-7" style="font-size:13px">${p.name}</span>
+          <span class="fw-8" style="font-size:13px">${fmtMoney(p.total)}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${(p.total/maxP*100).toFixed(1)}%"></div>
+        </div>
+      </div>`).join('');
+
+  } catch(e) {
+    toast('خطأ في تحميل البيانات', 'err');
+  }
+}
+
+loadDash();
+</script>
+{% endblock %}

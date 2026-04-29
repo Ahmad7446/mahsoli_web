@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}المشترون{% endblock %}
+{% block page_title %}المشترون{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn-sm btn-primary" onclick="openModal('modal-add-buyer')">+ مشتري جديد</button>
+{% endblock %}
+
+{% block content %}
+<div class="row-between mb-3 flex-wrap gap-2">
+  <input type="search" class="form-control" placeholder="بحث بالاسم أو الهاتف..."
+         id="buyer-search" oninput="filterBuyers(this.value)"
+         style="max-width:260px">
+  <button class="btn btn-outline btn-sm" onclick="loadBuyers()">↺ تحديث</button>
+</div>
+
+<div id="buyers-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px">
+  <div class="loading"><div class="spin"></div></div>
+</div>
+
+<!-- Modal: مشتري جديد -->
+<div class="overlay" id="modal-add-buyer">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title">مشتري جديد</span>
+      <button class="modal-close" onclick="closeModal('modal-add-buyer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group mb-3">
+        <label class="form-label">الاسم *</label>
+        <input type="text" class="form-control" id="b-name" placeholder="اسم المشتري">
+      </div>
+      <div class="form-row mb-3">
+        <div class="form-group">
+          <label class="form-label">رقم الهاتف</label>
+          <input type="tel" class="form-control ltr" id="b-phone" placeholder="05xxxxxxxx">
+        </div>
+        <div class="form-group">
+          <label class="form-label">الفئة</label>
+          <select class="form-control" id="b-category">
+            <option value="عادي">عادي</option>
+            <option value="مميز">مميز</option>
+            <option value="تاجر">تاجر</option>
+            <option value="جملة">جملة</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group mb-3">
+        <label class="form-label">العنوان</label>
+        <input type="text" class="form-control" id="b-address" placeholder="القرية / المدينة">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ملاحظات</label>
+        <textarea class="form-control" id="b-notes" rows="2"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="addBuyer()">حفظ</button>
+      <button class="btn btn-outline" onclick="closeModal('modal-add-buyer')">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: دفعة -->
+<div class="overlay" id="modal-payment">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title">تسجيل دفعة — <span id="pay-buyer-name"></span></span>
+      <button class="modal-close" onclick="closeModal('modal-payment')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="pay-buyer">
+      <div class="form-row mb-3">
+        <div class="form-group">
+          <label class="form-label">المبلغ (₪) *</label>
+          <input type="number" class="form-control" id="pay-amount" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">التاريخ</label>
+          <input type="date" class="form-control" id="pay-date">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">ملاحظات</label>
+        <input type="text" class="form-control" id="pay-notes" placeholder="اختياري">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="submitPayment()">تسجيل</button>
+      <button class="btn btn-outline" onclick="closeModal('modal-payment')">إلغاء</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allBuyers = [];
+
+async function loadBuyers() {
+  document.getElementById('buyers-grid').innerHTML = '<div class="loading"><div class="spin"></div></div>';
+  try {
+    allBuyers = await api('/api/buyers');
+    renderBuyers(allBuyers);
+  } catch(e) {
+    document.getElementById('buyers-grid').innerHTML = `<div class="card"><p class="text-red">${e.message}</p></div>`;
+  }
+}
+
+function renderBuyers(list) {
+  const grid = document.getElementById('buyers-grid');
+  if (!list.length) {
+    grid.innerHTML = '<div class="card empty-state"><div class="ei">◈</div><p>لا يوجد مشترون مسجلون</p></div>';
+    return;
+  }
+  grid.innerHTML = list.map(b => {
+    const hasDebt = b.debt > 0;
+    const catLabel = {'مميز':'⭐','تاجر':'🏪','جملة':'📦'}[b.category] || '';
+    return `<div class="card" style="display:flex;flex-direction:column;gap:0">
+      <div class="row-between mb-3">
+        <div>
+          <div class="fw-8" style="font-size:15px">${b.name} ${catLabel}</div>
+          <div class="text-xs text-muted mt-1">${b.phone||'بدون رقم'}${b.address?' · '+b.address:''}</div>
+        </div>
+        <div style="text-align:left">
+          <div class="fw-9" style="font-size:18px;color:${hasDebt?'var(--red)':'var(--green)'}">${fmtMoney(b.debt)}</div>
+          <div class="text-xs text-muted">متبقي</div>
+        </div>
+      </div>
+      <hr class="divider" style="margin:0 0 12px">
+      <div class="row gap-2 flex-wrap">
+        <button class="btn btn-sm btn-outline" onclick="openInvoice('${b.name}')">الفاتورة</button>
+        <button class="btn btn-sm btn-outline" onclick="openPayModal('${b.name}')">دفعة</button>
+        ${hasDebt ? `<button class="btn btn-sm btn-green" onclick="markAllPaid('${b.name}')">تحديد محاسب</button>` : ''}
+        ${b.phone ? `<button class="btn btn-sm btn-ghost" onclick="sendWA('${b.name}')">واتساب</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterBuyers(q) {
+  const lq = q.toLowerCase();
+  renderBuyers(allBuyers.filter(b =>
+    b.name.toLowerCase().includes(lq) || (b.phone||'').includes(lq)
+  ));
+}
+
+async function addBuyer() {
+  const name = document.getElementById('b-name').value.trim();
+  if (!name) { toast('الاسم مطلوب', 'err'); return; }
+  try {
+    await api('/api/buyers', 'POST', {
+      name,
+      phone:    document.getElementById('b-phone').value.trim(),
+      address:  document.getElementById('b-address').value.trim(),
+      category: document.getElementById('b-category').value,
+      notes:    document.getElementById('b-notes').value.trim(),
+    });
+    toast('تمت إضافة المشتري', 'ok');
+    closeModal('modal-add-buyer');
+    document.getElementById('b-name').value = '';
+    document.getElementById('b-phone').value = '';
+    document.getElementById('b-address').value = '';
+    document.getElementById('b-notes').value = '';
+    loadBuyers();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function openInvoice(name) {
+  window.open(`/api/buyers/${encodeURIComponent(name)}/invoice`, '_blank');
+}
+
+async function markAllPaid(name) {
+  if (!confirm(`تحديد جميع سجلات "${name}" كمحاسب؟`)) return;
+  try {
+    await api(`/api/buyers/${encodeURIComponent(name)}/mark_paid`, 'POST', {});
+    toast('تم بنجاح', 'ok');
+    loadBuyers();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function openPayModal(name) {
+  document.getElementById('pay-buyer').value = name;
+  document.getElementById('pay-buyer-name').textContent = name;
+  document.getElementById('pay-amount').value = '';
+  document.getElementById('pay-date').value   = todayISO();
+  document.getElementById('pay-notes').value  = '';
+  openModal('modal-payment');
+}
+
+async function submitPayment() {
+  const buyer  = document.getElementById('pay-buyer').value;
+  const amount = document.getElementById('pay-amount').value;
+  if (!amount) { toast('أدخل المبلغ', 'err'); return; }
+  try {
+    await api('/api/payments', 'POST', {
+      buyer, amount,
+      date:  document.getElementById('pay-date').value,
+      notes: document.getElementById('pay-notes').value,
+    });
+    toast('تم تسجيل الدفعة', 'ok');
+    closeModal('modal-payment');
+    loadBuyers();
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+async function sendWA(name) {
+  try {
+    const d = await api(`/api/whatsapp/${encodeURIComponent(name)}`);
+    window.open(d.url, '_blank');
+  } catch(e) { toast('خطأ في فتح واتساب', 'err'); }
+}
+
+loadBuyers();
+</script>
+{% endblock %}
